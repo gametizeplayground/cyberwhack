@@ -55,6 +55,8 @@ main {
     background: none;
     padding: 0;
     position: relative;
+    touch-action: manipulation; /* Optimize touch handling */
+    -webkit-tap-highlight-color: transparent; /* Remove tap highlight on mobile */
 }
 
 .hole {
@@ -65,6 +67,9 @@ main {
     align-items: flex-end;
     justify-content: center;
     overflow: hidden;
+    cursor: pointer; /* Show it's clickable */
+    touch-action: manipulation; /* Optimize touch handling */
+    -webkit-tap-highlight-color: transparent; /* Remove tap highlight */
 }
 
 .hole::before {
@@ -95,6 +100,8 @@ main {
     justify-content: flex-end;
     z-index: 2;
     transition: bottom 0.3s cubic-bezier(.68,-0.55,.27,1.55);
+    will-change: bottom, transform; /* Optimize for animations */
+    backface-visibility: hidden; /* Prevent flickering on mobile */
 }
 .mole.show {
     bottom: 0;
@@ -130,6 +137,8 @@ main {
     transform: translate(-50%, -50%) rotate(-20deg);
     transition: transform 0.08s;
     display: none;
+    will-change: transform, left, top; /* Optimize for animations */
+    backface-visibility: hidden; /* Prevent flickering on mobile */
 }
 .hammer.click {
     animation: hammer-hit 0.18s cubic-bezier(.68,-0.55,.27,1.55);
@@ -368,6 +377,7 @@ footer, .score-board {
     display: block;
     pointer-events: none;
     user-select: none;
+    touch-action: none; /* Prevent touch events on image */
 }
 
 /* Removed labels */

@@ -46,209 +46,135 @@ document.addEventListener('DOMContentLoaded', () => {
     // Mobile detection
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
 
-    // Sound effects - Improved desktop/mobile handling
-    class ThrottledAudioPool {
-        constructor(src, poolSize = 3) {
-            this.pool = [];
-            this.currentIndex = 0;
-            this.poolSize = poolSize;
+    // Optimized audio system for mobile performance
+    class OptimizedAudioManager {
+        constructor() {
+            this.audioContext = null;
+            this.buffers = new Map();
+            this.gainNodes = new Map();
             this.lastPlayTime = 0;
-            // Different settings for desktop vs mobile - reduced throttling for better mobile response
-            this.minInterval = isMobile ? 30 : 25; // Much faster response on mobile
-            this.playingCount = 0;
-            this.maxSimultaneous = isMobile ? Math.min(poolSize, 12) : Math.min(poolSize, 16);
+            this.minInterval = isMobile ? 20 : 15; // Reduced throttling for better responsiveness
+            this.initialized = false;
+        }
+        
+        async init() {
+            if (this.initialized) return;
             
-            // Create audio pool with improved mobile preloading
-            for (let i = 0; i < poolSize; i++) {
-                const audio = new Audio(src);
-                audio.preload = 'auto';
-                audio.volume = isMobile ? 0.7 : 0.8; // Slightly lower volume on mobile to prevent distortion
+            try {
+                // Create Web Audio API context
+                this.audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 
-                // Aggressive preloading for mobile
-                if (isMobile) {
-                    audio.load(); // Force loading on mobile
+                // Resume context if suspended (required for mobile)
+                if (this.audioContext.state === 'suspended') {
+                    await this.audioContext.resume();
                 }
                 
-                // Track when audio finishes
-                audio.addEventListener('ended', () => {
-                    this.playingCount = Math.max(0, this.playingCount - 1);
-                });
+                // Load audio files as buffers for better performance
+                await this.loadAudioBuffer('hit', 'assets/sound_hit1.ogg');
+                await this.loadAudioBuffer('score', 'assets/sound_score.ogg');
+                await this.loadAudioBuffer('wrong', 'assets/sound_wrong.mp3');
                 
-                // Add error handling
-                audio.addEventListener('error', (e) => {
-                    console.log('Audio error:', e);
-                });
-                
-                // Additional mobile-specific optimizations
-                if (isMobile) {
-                    audio.addEventListener('canplaythrough', () => {
-                        // Audio is ready to play
-                    });
-                }
-                
-                this.pool.push(audio);
+                this.initialized = true;
+                console.log('Audio system initialized successfully');
+            } catch (error) {
+                console.log('Web Audio API not available, falling back to HTML5 Audio');
+                this.fallbackToHTML5();
             }
         }
         
-        play() {
+        async loadAudioBuffer(name, src) {
+            try {
+                const response = await fetch(src);
+                const arrayBuffer = await response.arrayBuffer();
+                const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer);
+                this.buffers.set(name, audioBuffer);
+                
+                // Create gain node for volume control
+                const gainNode = this.audioContext.createGain();
+                gainNode.connect(this.audioContext.destination);
+                gainNode.gain.value = isMobile ? 0.6 : 0.8;
+                this.gainNodes.set(name, gainNode);
+            } catch (error) {
+                console.log(`Failed to load audio: ${src}`, error);
+            }
+        }
+        
+        fallbackToHTML5() {
+            // Fallback to simple HTML5 Audio for older browsers
+            this.html5Audio = {
+                hit: new Audio('assets/sound_hit1.ogg'),
+                score: new Audio('assets/sound_score.ogg'),
+                wrong: new Audio('assets/sound_wrong.mp3')
+            };
+            
+            // Preload and configure
+            Object.values(this.html5Audio).forEach(audio => {
+                audio.preload = 'auto';
+                audio.volume = isMobile ? 0.6 : 0.8;
+            });
+            
+            this.initialized = true;
+        }
+        
+        play(soundName) {
+            if (!this.initialized) return;
+            
             const now = Date.now();
-            
-            // Less aggressive throttling for desktop
-            if (now - this.lastPlayTime < this.minInterval) {
-                return;
-            }
-            
-            // Limit simultaneous sounds
-            if (this.playingCount >= this.maxSimultaneous) {
-                return;
-            }
+            if (now - this.lastPlayTime < this.minInterval) return;
             
             try {
-                const audio = this.pool[this.currentIndex];
-                
-                // Only reset if audio is not currently playing to avoid interruption lag on mobile
-                if (!audio.paused) {
-                    // Skip to next audio instance instead of stopping current one
-                    this.currentIndex = (this.currentIndex + 1) % this.poolSize;
-                    const nextAudio = this.pool[this.currentIndex];
-                    if (!nextAudio.paused) {
-                        // If next is also playing, find the first available one
-                        for (let i = 0; i < this.poolSize; i++) {
-                            const testIndex = (this.currentIndex + i) % this.poolSize;
-                            if (this.pool[testIndex].paused || this.pool[testIndex].ended) {
-                                this.currentIndex = testIndex;
-                                break;
-                            }
-                        }
-                    }
-                }
-                
-                const finalAudio = this.pool[this.currentIndex];
-                finalAudio.currentTime = 0;
-                
-                // Play with promise handling
-                const playPromise = finalAudio.play();
-                if (playPromise !== undefined) {
-                    playPromise.then(() => {
-                        this.playingCount++;
-                    }).catch((error) => {
-                        // Silently fail on mobile to prevent console spam
-                        if (!isMobile) {
-                            console.log('Audio play failed:', error);
-                        }
-                    });
-                } else {
-                    this.playingCount++;
+                if (this.audioContext && this.buffers.has(soundName)) {
+                    // Use Web Audio API
+                    const source = this.audioContext.createBufferSource();
+                    source.buffer = this.buffers.get(soundName);
+                    source.connect(this.gainNodes.get(soundName));
+                    source.start(0);
+                } else if (this.html5Audio && this.html5Audio[soundName]) {
+                    // Use HTML5 Audio fallback
+                    const audio = this.html5Audio[soundName].cloneNode();
+                    audio.currentTime = 0;
+                    audio.play().catch(() => {}); // Silent fail
                 }
                 
                 this.lastPlayTime = now;
-                this.currentIndex = (this.currentIndex + 1) % this.poolSize;
-                
             } catch (error) {
-                if (!isMobile) {
-                    console.log('Audio error:', error);
-                }
+                // Silent fail to prevent console spam
             }
         }
     }
     
-    // Create audio pools - increased instances for better mobile performance
-    const soundHitPool = new ThrottledAudioPool('assets/sound_hit1.ogg', isMobile ? 20 : 24);
-    const soundScorePool = new ThrottledAudioPool('assets/sound_score.ogg', isMobile ? 6 : 8);
-    const soundWrongPool = new ThrottledAudioPool('assets/sound_wrong.mp3', isMobile ? 6 : 8);
+    // Create optimized audio manager
+    const audioManager = new OptimizedAudioManager();
 
-    // Audio enabling - optimized for mobile and desktop
+    // Simplified audio enabling
     let audioEnabled = false;
-    function enableAudio() {
+    async function enableAudio() {
         if (!audioEnabled) {
-            // Different strategies for mobile vs desktop
-            if (isMobile) {
-                // Mobile: Try to unlock multiple audio instances
-                const unlockPromises = [];
-                for (let i = 0; i < Math.min(3, soundHitPool.pool.length); i++) {
-                    const testAudio = soundHitPool.pool[i];
-                    const originalVolume = testAudio.volume;
-                    testAudio.volume = 0.01;
-                    
-                    const playPromise = testAudio.play();
-                    if (playPromise !== undefined) {
-                        unlockPromises.push(
-                            playPromise.then(() => {
-                                testAudio.pause();
-                                testAudio.currentTime = 0;
-                                testAudio.volume = originalVolume;
-                            }).catch(() => {
-                                testAudio.volume = originalVolume;
-                            })
-                        );
-                    } else {
-                        testAudio.volume = originalVolume;
-                    }
-                }
-                
-                Promise.all(unlockPromises).then(() => {
-                    audioEnabled = true;
-                    console.log('Mobile audio enabled successfully');
-                }).catch(() => {
-                    console.log('Mobile audio unlock failed, will retry on next interaction');
-                });
-            } else {
-                // Desktop: Single audio unlock
-                const testAudio = soundHitPool.pool[0];
-                const originalVolume = testAudio.volume;
-                
-                testAudio.volume = 0.01;
-                const playPromise = testAudio.play();
-                
-                if (playPromise !== undefined) {
-                    playPromise.then(() => {
-                        testAudio.pause();
-                        testAudio.currentTime = 0;
-                        testAudio.volume = originalVolume;
-                        audioEnabled = true;
-                        console.log('Desktop audio enabled successfully');
-                    }).catch((error) => {
-                        console.log('Audio unlock failed:', error);
-                        testAudio.volume = originalVolume;
-                    });
-                } else {
-                    testAudio.volume = originalVolume;
-                    audioEnabled = true;
-                }
-            }
+            await audioManager.init();
+            audioEnabled = true;
         }
     }
 
-    // Sound functions with better mobile and desktop support
+    // Optimized sound functions
     function playSoundHit() {
         if (!audioEnabled) {
-            enableAudio(); // Try to enable audio if not already enabled
+            enableAudio();
         }
-        soundHitPool.play();
+        audioManager.play('hit');
     }
 
     function playSoundScore() {
         if (!audioEnabled) {
             enableAudio();
         }
-        // Play on both mobile and desktop, but with different volume
-        if (isMobile) {
-            // Lower volume on mobile
-            soundScorePool.pool.forEach(audio => audio.volume = 0.4);
-        }
-        soundScorePool.play();
-        }
+        audioManager.play('score');
+    }
 
     function playSoundWrong() {
         if (!audioEnabled) {
             enableAudio();
         }
-        // Play on both mobile and desktop
-        if (isMobile) {
-            // Lower volume on mobile
-            soundWrongPool.pool.forEach(audio => audio.volume = 0.4);
-        }
-        soundWrongPool.play();
+        audioManager.play('wrong');
     }
 
     // Calculate difficulty progression
@@ -567,40 +493,65 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    holes.forEach((hole, idx) => {
-        hole.addEventListener('click', (e) => {
-            if (!gameActive) return;
-            
-            // Boss handling
-            if (isBossActive && idx === bossIndex) {
-                handleBossTap();
-                return;
-            }
+    // Handle virus clicking with both click and touch events
+    function handleVirusClick(idx, e) {
+        if (!gameActive) return;
+        
+        // Enable audio on first interaction
+        if (!audioEnabled) {
+            enableAudio();
+        }
+        
+        // Show hammer animation for virus hits
+        showHammerAnimation(e);
+        
+        // Boss handling
+        if (isBossActive && idx === bossIndex) {
+            handleBossTap();
+            return;
+        }
 
-            if (activeMoles.has(idx) && moles[idx].classList.contains('show')) {
-                const moleData = activeMoles.get(idx);
-                
-                // Clear the timeout and remove from active moles
-                clearTimeout(moleData.timeout);
-                activeMoles.delete(idx);
-                
-                const img = moles[idx].querySelector('.mole-img');
-                
-                // Normal threat neutralized - use appropriate whacked asset based on stage
-                const currentStage = bossCount + 1;
-                if (img) img.src = getMoleAsset(currentStage, true);
-                showPointPopup(moles[idx], '+10', 'correct');
-                score += 10;
-                playSoundScore();
-                
-                // Hide mole after showing feedback - reset to ready state
-                setTimeout(() => { 
-                    if (img) img.src = getMoleAsset(currentStage, false); 
-                    moles[idx].classList.remove('show');
-                }, 500);
-                
-                scoreElement.textContent = `SCORE ${score}`;
-            }
+        if (activeMoles.has(idx) && moles[idx].classList.contains('show')) {
+            const moleData = activeMoles.get(idx);
+            
+            // Clear the timeout and remove from active moles
+            clearTimeout(moleData.timeout);
+            activeMoles.delete(idx);
+            
+            const img = moles[idx].querySelector('.mole-img');
+            
+            // Normal threat neutralized - use appropriate whacked asset based on stage
+            const currentStage = bossCount + 1;
+            if (img) img.src = getMoleAsset(currentStage, true);
+            showPointPopup(moles[idx], '+10', 'correct');
+            score += 10;
+            playSoundScore();
+            
+            // Hide mole after showing feedback - reset to ready state
+            setTimeout(() => { 
+                if (img) img.src = getMoleAsset(currentStage, false); 
+                moles[idx].classList.remove('show');
+            }, 500);
+            
+            scoreElement.textContent = `SCORE ${score}`;
+        } else {
+            // Miss - play hit sound but no score
+            playSoundHit();
+        }
+    }
+
+    holes.forEach((hole, idx) => {
+        // Add click event
+        hole.addEventListener('click', (e) => {
+            e.stopPropagation(); // Prevent game board click
+            handleVirusClick(idx, e);
+        });
+        
+        // Add touch event for mobile
+        hole.addEventListener('touchstart', (e) => {
+            e.preventDefault(); // Prevent default touch behavior
+            e.stopPropagation(); // Prevent game board touch
+            handleVirusClick(idx, e);
         });
     });
 
@@ -619,33 +570,58 @@ document.addEventListener('DOMContentLoaded', () => {
         setTimeout(() => { popup.remove(); }, 700);
     }
 
-    gameBoard.addEventListener('click', (e) => {
-        if (!gameActive) return;
-        
-        // Enable audio on first interaction and ensure hit sound plays
-        if (!audioEnabled) {
-        enableAudio();
-        }
-        
+    // Show hammer animation at click position
+    function showHammerAnimation(e) {
         clearTimeout(hammerTimeout);
         
         // Get position relative to game board
         const boardRect = gameBoard.getBoundingClientRect();
-        const left = e.clientX - boardRect.left;
-        const top = e.clientY - boardRect.top;
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        const left = clientX - boardRect.left;
+        const top = clientY - boardRect.top;
         
-        hammer.style.left = left + 'px';
-        hammer.style.top = top + 'px';
-        hammer.style.display = 'block';
-        hammer.classList.add('click');
-        
-        // Play hit sound with improved reliability
-        playSoundHit();
+        // Use requestAnimationFrame for smoother visual updates
+        requestAnimationFrame(() => {
+            hammer.style.left = left + 'px';
+            hammer.style.top = top + 'px';
+            hammer.style.display = 'block';
+            hammer.classList.add('click');
+        });
         
         hammerTimeout = setTimeout(() => {
             hammer.classList.remove('click');
             hammer.style.display = 'none';
         }, 350);
+    }
+
+    // Optimized touch/click handler for mobile performance (misses only)
+    function handleGameInteraction(e) {
+        if (!gameActive) return;
+        
+        // Check if click was on a hole (virus area) - if so, let hole handle it
+        const target = e.target;
+        if (target.classList.contains('hole') || target.closest('.hole')) {
+            return; // Let the hole handle the click
+        }
+        
+        // Enable audio on first interaction
+        if (!audioEnabled) {
+            enableAudio(); // Don't await to avoid blocking
+        }
+        
+        // Show hammer animation for misses
+        showHammerAnimation(e);
+        
+        // Play hit sound immediately for better responsiveness
+        playSoundHit();
+    }
+
+    // Add both click and touch events for better mobile support
+    gameBoard.addEventListener('click', handleGameInteraction);
+    gameBoard.addEventListener('touchstart', (e) => {
+        e.preventDefault(); // Prevent default touch behavior
+        handleGameInteraction(e);
     });
 
     function startTimer() {
@@ -708,34 +684,28 @@ document.addEventListener('DOMContentLoaded', () => {
         startBtn.style.display = 'inline-block';
         startBtn.style.pointerEvents = 'auto';
         startBtn.style.zIndex = '100';
-        startBtn.addEventListener('click', () => {
+        startBtn.addEventListener('click', async () => {
             console.log('Start Game button clicked');
             
             // Enable audio immediately when starting game
-            enableAudio();
+            await enableAudio();
             
-            // Small delay to ensure audio context is ready
-            setTimeout(() => {
             if (startBtn) startBtn.style.display = 'none';
             if (restartBtn) restartBtn.style.display = 'none';
             if (hammer) hammer.style.display = 'none';
             startGame();
-            }, 100);
         });
     }
 
     if (restartBtn) {
-        restartBtn.addEventListener('click', () => {
+        restartBtn.addEventListener('click', async () => {
             // Enable audio on interaction
-            enableAudio();
+            await enableAudio();
             
-            // Small delay to ensure audio context is ready
-            setTimeout(() => {
             if (restartBtn) restartBtn.style.display = 'none';
             if (startBtn) startBtn.style.display = 'none';
             if (hammer) hammer.style.display = 'none';
             startGame();
-            }, 100);
         });
     }
 
