@@ -213,7 +213,7 @@ document.addEventListener('DOMContentLoaded', () => {
         moles.forEach(mole => {
             const img = mole.querySelector('.mole-img');
             if (img) {
-                img.src = getMoleAsset(1, false); // Stage 1, not whacked
+                img.src = getMoleAsset(1, false, false); // Stage 1, not whacked, not cybersloth
             }
             mole.classList.remove('show');
         });
@@ -231,8 +231,12 @@ document.addEventListener('DOMContentLoaded', () => {
         startSpawning();
     }
 
-    // Function to get the appropriate asset based on stage
-    function getMoleAsset(stage, isWhacked = false) {
+    // Function to get the appropriate asset based on stage and character type
+    function getMoleAsset(stage, isWhacked = false, isCybersloth = false) {
+        if (isCybersloth) {
+            return isWhacked ? 'assets/cybersloth_whacked.webp' : 'assets/cybersloth_normal.webp';
+        }
+        
         if (stage === 1) {
             return isWhacked ? 'assets/virus_minion_1_whacked.png' : 'assets/virus_minion_1.png';
         } else if (stage === 2) {
@@ -289,17 +293,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         
         const idx = availableHoles[Math.floor(Math.random() * availableHoles.length)];
+        
+        // 20% chance to spawn cybersloth (penalty character)
+        const isCybersloth = Math.random() < 0.2;
+        
         const moleData = {
             index: idx,
             isThreat: true,
+            isCybersloth: isCybersloth,
             timeout: null
         };
         
-        // Update mole image based on current stage (stage 1 = bossCount 0)
+        // Update mole image based on current stage and character type
         const currentStage = bossCount + 1;
         const moleImg = moles[idx].querySelector('.mole-img');
         if (moleImg) {
-            moleImg.src = getMoleAsset(currentStage, false);
+            moleImg.src = getMoleAsset(currentStage, false, isCybersloth);
         }
         
         // Show the mole
@@ -519,19 +528,34 @@ document.addEventListener('DOMContentLoaded', () => {
             activeMoles.delete(idx);
             
             const img = moles[idx].querySelector('.mole-img');
-            
-            // Normal threat neutralized - use appropriate whacked asset based on stage
             const currentStage = bossCount + 1;
-            if (img) img.src = getMoleAsset(currentStage, true);
-            showPointPopup(moles[idx], '+10', 'correct');
-            score += 10;
-            playSoundScore();
             
-            // Hide mole after showing feedback - reset to ready state
-            setTimeout(() => { 
-                if (img) img.src = getMoleAsset(currentStage, false); 
-                moles[idx].classList.remove('show');
-            }, 500);
+            // Check if this is a cybersloth (penalty character)
+            if (moleData.isCybersloth) {
+                // Cybersloth penalty - deduct 3 points
+                if (img) img.src = getMoleAsset(currentStage, true, true);
+                showPointPopup(moles[idx], '-3', 'wrong');
+                score = Math.max(0, score - 3); // Prevent negative score
+                playSoundWrong();
+                
+                // Hide mole after showing feedback - reset to ready state
+                setTimeout(() => { 
+                    if (img) img.src = getMoleAsset(currentStage, false, true); 
+                    moles[idx].classList.remove('show');
+                }, 500);
+            } else {
+                // Normal threat neutralized - use appropriate whacked asset based on stage
+                if (img) img.src = getMoleAsset(currentStage, true, false);
+                showPointPopup(moles[idx], '+10', 'correct');
+                score += 10;
+                playSoundScore();
+                
+                // Hide mole after showing feedback - reset to ready state
+                setTimeout(() => { 
+                    if (img) img.src = getMoleAsset(currentStage, false, false); 
+                    moles[idx].classList.remove('show');
+                }, 500);
+            }
             
             scoreElement.textContent = `SCORE ${score}`;
         } else {
